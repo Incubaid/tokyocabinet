@@ -2794,6 +2794,9 @@ static bool tchdbreadrec(TCHDB *hdb, TCHREC *rec, char *rbuf){
     if(rsiz > hdb->runit){
       rsiz = hdb->runit;
     } else if(rsiz < (int)(sizeof(uint8_t) + sizeof(uint32_t))){
+      fprintf(stderr, "tchdbreadrec: invalid size %d\n", rsiz);
+      abort();
+
       tchdbsetecode(hdb, TCERHEAD, __FILE__, __LINE__, __func__);
       HDBUNLOCKDB(hdb);
       return false;
@@ -2812,6 +2815,9 @@ static bool tchdbreadrec(TCHDB *hdb, TCHREC *rec, char *rbuf){
     rec->rsiz = TCITOHL(lnum);
     return true;
   } else if(rec->magic != HDBMAGICREC){
+    fprintf(stderr, "tchdbreadrec: invalid magic %d\n", rec->magic);
+    abort();
+
     tchdbsetecode(hdb, TCERHEAD, __FILE__, __LINE__, __func__);
     return false;
   }
