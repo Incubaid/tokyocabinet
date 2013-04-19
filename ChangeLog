@@ -1,3 +1,9 @@
+2012-08-10  FAL Labs  <info@fallabs.com>
+
+	- tcadb.cc (tcadbmisc): compilation warnings ware supressed.
+
+	- Release: 1.4.48
+
 2010-08-15  FAL Labs  <info@fallabs.com>
 
 	* tchdb.cc (tchdbfbpmerge): size checking was added.
