@@ -2546,7 +2546,12 @@ static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
     if(hdb->iter == off) hdb->iter += nrec.rsiz;
     off += nrec.rsiz;
   }
-  uint32_t jsiz = off - rec->off;
+  uint64_t jsiz64 = off - rec->off;
+  uint32_t jsiz = jsiz64;
+  if((uint64_t)jsiz != jsiz64) {
+    fprintf(stderr, "tchdbfbpsplice: truncated jsiz %lu\n", jsiz64);
+    abort();
+  }
   if(jsiz < nsiz) return false;
   rec->rsiz = jsiz;
   uint64_t base = rec->off;
@@ -2561,11 +2566,22 @@ static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
   if(jsiz > nsiz * 2){
     uint32_t psiz = tchdbpadsize(hdb, rec->off + nsiz);
     uint64_t noff = rec->off + nsiz + psiz;
+    uint64_t nsiz64 = 0, rsiz64 = 0;
     if(jsiz >= (noff - rec->off) * 2){
       TCDODEBUG(hdb->cnt_dividefbp++);
-      nsiz = off - noff;
+      nsiz64 = off - noff;
+      nsiz = nsiz64;
+      if((uint64_t)nsiz != nsiz64) {
+        fprintf(stderr, "tchdbfbpsplice: truncated nsiz %lu\n", nsiz64);
+        abort();
+      }
       if(!tchdbwritefb(hdb, noff, nsiz)) return false;
-      rec->rsiz = noff - rec->off;
+      rsiz64 = noff - rec->off;
+      rec->rsiz = rsiz64;
+      if((uint64_t)rec->rsiz != rsiz64) {
+        fprintf(stderr, "tchdbfbpsplice: truncated rec->rsiz %lu\n", rsiz64);
+        abort();
+      }
       tchdbfbpinsert(hdb, noff, nsiz);
     }
   }
