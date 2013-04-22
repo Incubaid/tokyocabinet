@@ -2514,6 +2514,7 @@ static bool tchdbfbpsearch(TCHDB *hdb, TCHREC *rec){
    The return value is whether splicing succeeded or not. */
 static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
   assert(hdb && rec && nsiz > 0);
+  if (nsiz > (0x80000000 - hdb->align)) return false;
   if(hdb->mmtx){
     if(hdb->fbpnum < 1) return false;
     uint64_t off = rec->off + rec->rsiz;
@@ -2536,14 +2537,18 @@ static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
     return false;
   }
   uint64_t off = rec->off + rec->rsiz;
+#define HDBMAXSCAN (1024 * 1024)
+  uint64_t moff = rec->off + nsiz + ((nsiz > HDBMAXSCAN) ? nsiz : HDBMAXSCAN);
+  if(moff > hdb->fsiz) moff = hdb->fsiz;
   TCHREC nrec;
   char nbuf[HDBIOBUFSIZ];
-  while(off < hdb->fsiz){
+  while(off < moff){
     nrec.off = off;
     if(!tchdbreadrec(hdb, &nrec, nbuf)) return false;
     if(nrec.magic != HDBMAGICFB) break;
     if(hdb->dfcur == off) hdb->dfcur += nrec.rsiz;
     if(hdb->iter == off) hdb->iter += nrec.rsiz;
+    if(((uint32_t) (off + nrec.rsiz)) != (off + nrec.rsiz)) break;
     off += nrec.rsiz;
   }
   uint64_t jsiz64 = off - rec->off;
