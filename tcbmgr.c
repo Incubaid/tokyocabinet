@@ -31,6 +31,8 @@ static void printerr(TCBDB *bdb);
 static int printdata(const char *ptr, int size, bool px);
 static char *mygetline(FILE *ifp);
 static int mycmpfunc(const char *aptr, int asiz, const char *bptr, int bsiz, void *op);
+static int write_all(int fd, const char *data, size_t len);
+static int read_all(int fd, char *data, size_t len);
 static int runcreate(int argc, char **argv);
 static int runinform(int argc, char **argv);
 static int runput(int argc, char **argv);
@@ -40,6 +42,8 @@ static int runlist(int argc, char **argv);
 static int runoptimize(int argc, char **argv);
 static int runimporttsv(int argc, char **argv);
 static int runversion(int argc, char **argv);
+static int rundump(int argc, char **argv);
+static int runimport(int argc, char **argv);
 static int proccreate(const char *path, int lmemb, int nmemb,
                       int bnum, int apow, int fpow, TCCMP cmp, int opts);
 static int procinform(const char *path, int omode);
@@ -54,6 +58,8 @@ static int procoptimize(const char *path, int lmemb, int nmemb,
                         int bnum, int apow, int fpow, TCCMP cmp, int opts, int omode, bool df);
 static int procimporttsv(const char *path, const char *file, int omode, bool sc);
 static int procversion(void);
+static int procdump(const char *path, TCCMP cmp, int omode);
+static int procimport(const char *path, int omode);
 
 
 /* main routine */
@@ -82,6 +88,10 @@ int main(int argc, char **argv){
     rv = runimporttsv(argc, argv);
   } else if(!strcmp(argv[1], "version") || !strcmp(argv[1], "--version")){
     rv = runversion(argc, argv);
+  } else if(!strcmp(argv[1], "dump")){
+    rv = rundump(argc, argv);
+  } else if(!strcmp(argv[1], "import")){
+    rv = runimport(argc, argv);
   } else {
     usage();
   }
@@ -107,6 +117,8 @@ static void usage(void){
           " path [lmemb [nmemb [bnum [apow [fpow]]]]]\n", g_progname);
   fprintf(stderr, "  %s importtsv [-nl|-nb] [-sc] path [file]\n", g_progname);
   fprintf(stderr, "  %s version\n", g_progname);
+  fprintf(stderr, "  %s dump [-cd|-ci|-cj] [-nl|-nb] path\n", g_progname);
+  fprintf(stderr, "  %s import [-nl|-nb] path\n", g_progname);
   fprintf(stderr, "\n");
   exit(1);
 }
@@ -166,6 +178,44 @@ static char *mygetline(FILE *ifp){
 
 /* dummy comparison function */
 static int mycmpfunc(const char *aptr, int asiz, const char *bptr, int bsiz, void *op){
+  return 0;
+}
+
+/* safe 'write' */
+static int write_all(int fd, const char *data, size_t len){
+  ssize_t r = 0;
+  while(len > 0){
+    r = write(fd, data, len);
+    if(r < 0){
+      if(errno == EAGAIN || errno == EINTR){
+        continue;
+      }
+      perror("write");
+      return -1;
+    }
+    len -= r;
+  }
+  return 0;
+}
+
+/* safe 'read' */
+static int read_all(int fd, char *data, size_t len){
+  ssize_t r = 0;
+  while(len > 0){
+    r = read(fd, data, len);
+    if(r == 0){
+      return -1;
+    }
+    if(r < 0){
+      if(errno == EAGAIN || errno == EINTR){
+        continue;
+      }
+      perror("read");
+      return -1;
+    }
+    len -= r;
+    data += r;
+  }
   return 0;
 }
 
@@ -590,6 +640,60 @@ static int runversion(int argc, char **argv){
   return rv;
 }
 
+/* parse arguments of dump command */
+static int rundump(int argc, char **argv){
+  char *path = NULL;
+  TCCMP cmp = NULL;
+  int omode = 0;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-cd")){
+        cmp = tccmpdecimal;
+      } else if(!strcmp(argv[i], "-ci")){
+        cmp = tccmpint32;
+      } else if(!strcmp(argv[i], "-cj")){
+        cmp = tccmpint64;
+      } else if(!strcmp(argv[i], "-nl")){
+        omode |= BDBONOLCK;
+      } else if(!strcmp(argv[i], "-nb")){
+        omode |= BDBOLCKNB;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!path) usage();
+  int rv = procdump(path, cmp, omode);
+  return rv;
+}
+
+/* parse arguments of import command */
+static int runimport(int argc, char **argv){
+  char *path = NULL;
+  int omode = 0;
+  for(int i = 2; i < argc; i++){
+    if(!path && argv[i][0] == '-'){
+      if(!strcmp(argv[i], "-nl")){
+        omode |= BDBONOLCK;
+      } else if(!strcmp(argv[i], "-nb")){
+        omode |= BDBOLCKNB;
+      } else {
+        usage();
+      }
+    } else if(!path){
+      path = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if(!path) usage();
+  int rv = procimport(path, omode);
+  return rv;
+}
 
 /* perform create command */
 static int proccreate(const char *path, int lmemb, int nmemb,
@@ -1016,5 +1120,169 @@ static int procversion(void){
 }
 
 
+/* Note: these magics *must* have the same length */
+#define DUMP_MAGIC_BEGIN "tcd1"
+#define DUMP_MAGIC_END "tce1"
+
+static int procdump(const char *path, TCCMP cmp, int omode){
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(cmp && !tcbdbsetcmpfunc(bdb, cmp, NULL)) printerr(bdb);
+  if(!tcbdbsetcodecfunc(bdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(bdb);
+  if(!tcbdbopen(bdb, path, BDBOREADER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
+    return 1;
+  }
+  bool err = false;
+  char magic_begin[] = DUMP_MAGIC_BEGIN;
+  char magic_end[] = DUMP_MAGIC_END;
+  BDBCUR *cur = tcbdbcurnew(bdb);
+  if(!tcbdbcurfirst(cur) && tcbdbecode(bdb) != TCENOREC){
+    printerr(bdb);
+    err = true;
+  }
+  TCXSTR *key = tcxstrnew();
+  TCXSTR *val = tcxstrnew();
+  uint64_t len;
+  while(tcbdbcurrec(cur, key, val)){
+    if(write_all(STDOUT_FILENO, magic_begin, sizeof(magic_begin) - 1) != 0){
+      err = true;
+      break;
+    }
+    len = tcxstrsize(key);
+    if(write_all(STDOUT_FILENO, (const char *)&len, sizeof(len)) != 0){
+      err = true;
+      break;
+    }
+    if(write_all(STDOUT_FILENO, tcxstrptr(key), len) != 0){
+      err = true;
+      break;
+    }
+    len = tcxstrsize(val);
+    if(write_all(STDOUT_FILENO, (const char *)&len, sizeof(len)) != 0){
+      err = true;
+      break;
+    }
+    if(write_all(STDOUT_FILENO, tcxstrptr(val), len) != 0){
+      err = true;
+      break;
+    }
+    if(!tcbdbcurnext(cur) && tcbdbecode(bdb) != TCENOREC){
+      printerr(bdb);
+      err = true;
+    }
+  }
+  if(write_all(STDOUT_FILENO, magic_end, sizeof(magic_end) - 1) != 0){
+    err = true;
+  }
+  tcxstrdel(val);
+  tcxstrdel(key);
+  tcbdbcurdel(cur);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
+    err = true;
+  }
+  tcbdbdel(bdb);
+  return err ? 1 : 0;
+}
+
+#define IMPORT_SCRATCH_SIZE (1024)
+
+static int procimport(const char *path, int omode){
+  TCBDB *bdb = tcbdbnew();
+  if(g_dbgfd >= 0) tcbdbsetdbgfd(bdb, g_dbgfd);
+  if(!tcbdbsetcodecfunc(bdb, _tc_recencode, NULL, _tc_recdecode, NULL)) printerr(bdb);
+  if(!tcbdbopen(bdb, path, BDBOWRITER | omode)){
+    printerr(bdb);
+    tcbdbdel(bdb);
+    return 1;
+  }
+  bool err = false;
+  int cnt = 0;
+  char magic_begin[] = DUMP_MAGIC_BEGIN;
+  char magic_end[] = DUMP_MAGIC_END;
+  char magic[sizeof(magic_begin) - 1];
+  char scratch_key[IMPORT_SCRATCH_SIZE];
+  char scratch_value[IMPORT_SCRATCH_SIZE];
+  char *key = NULL;
+  char *value = NULL;
+  uint64_t key_size;
+  uint64_t value_size;
+  while(!err){
+    if(read_all(STDIN_FILENO, magic, sizeof(magic_begin) - 1) != 0){
+      err = true;
+      break;
+    }
+    if(memcmp(magic_begin, magic, sizeof(magic_begin) - 1) != 0){
+      if(memcmp(magic_end, magic, sizeof(magic_end) - 1) == 0){
+        break;
+      }
+      err = true;
+      break;
+    }
+    if(read_all(STDIN_FILENO, (char *)&key_size, sizeof(key_size)) != 0){
+      err = true;
+      break;
+    }
+    if(key_size <= sizeof(scratch_key)){
+      key = scratch_key;
+    } else {
+      key = tcmalloc(key_size);
+    }
+    if(read_all(STDIN_FILENO, key, key_size) != 0){
+      err = true;
+      if(key != scratch_key){
+        tcfree(key);
+      }
+      break;
+    }
+    if(read_all(STDIN_FILENO, (char *)&value_size, sizeof(value_size)) != 0){
+      err = true;
+      if(key != scratch_key){
+        tcfree(key);
+      }
+      break;
+    }
+    if(value_size <= sizeof(scratch_value)){
+      value = scratch_value;
+    } else {
+      value = tcmalloc(value_size);
+    }
+    if(read_all(STDIN_FILENO, value, value_size) != 0){
+      err = true;
+      if(key != scratch_key){
+        tcfree(key);
+      }
+      if(value != scratch_value){
+        tcfree(value);
+      }
+      break;
+    }
+    if(!tcbdbputdup(bdb, key, key_size, value, value_size)){
+      printerr(bdb);
+      err = true;
+    }
+    if(cnt > 0 && cnt % 100 == 0){
+      putchar('.');
+      fflush(stdout);
+      if(cnt % 5000 == 0) printf(" (%08d)\n", cnt);
+    }
+    cnt++;
+    if(key != scratch_key){
+      tcfree(key);
+    }
+    if(value != scratch_value){
+      tcfree(value);
+    }
+  }
+  printf(" (%08d)\n", cnt);
+  if(!tcbdbclose(bdb)){
+    if(!err) printerr(bdb);
+    err = true;
+  }
+  tcbdbdel(bdb);
+  return err ? 1 : 0;
+}
 
 // END OF FILE
