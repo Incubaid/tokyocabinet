@@ -49,7 +49,8 @@ CC = @CC@
 CPPFLAGS = @MYCPPFLAGS@ \
   -D_TC_PREFIX="\"$(prefix)\"" -D_TC_INCLUDEDIR="\"$(INCLUDEDIR)\"" \
   -D_TC_LIBDIR="\"$(LIBDIR)\"" -D_TC_BINDIR="\"$(BINDIR)\"" -D_TC_LIBEXECDIR="\"$(LIBEXECDIR)\"" \
-  -D_TC_APPINC="\"-I$(INCLUDEDIR)\"" -D_TC_APPLIBS="\"-L$(LIBDIR) -ltokyocabinet @LIBS@\""
+  -D_TC_APPINC="\"-I$(INCLUDEDIR)\"" -D_TC_APPLIBS="\"-L$(LIBDIR) -ltokyocabinet @LIBS@\"" \
+  -I$(srcdir)
 CFLAGS = @MYCFLAGS@
 LDFLAGS = @MYLDFLAGS@
 CMDLDFLAGS = @MYCMDLDFLAGS@
@@ -58,6 +59,9 @@ LDENV =
 RUNENV = @MYLDLIBPATHENV@=.:$(LIBDIR)
 POSTCMD = @MYPOSTCMD@
 
+# Out-of-tree building support
+srcdir = @srcdir@
+VPATH = @srcdir@
 
 
 #================================================================
