@@ -3713,6 +3713,7 @@ enum {                                   /* enumeration for error codes */
   TCERMDIR,                              /* rmdir error */
   TCEKEEP,                               /* existing record */
   TCENOREC,                              /* no record found */
+  TCEOVERFLOW,                           /* value too large to be stored in data type */
   TCEMISC = 9999                         /* miscellaneous error */
 };
 
