@@ -2546,7 +2546,12 @@ static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
     if(hdb->iter == off) hdb->iter += nrec.rsiz;
     off += nrec.rsiz;
   }
-  uint32_t jsiz = off - rec->off;
+  uint64_t jsiz64 = off - rec->off;
+  uint32_t jsiz = jsiz64;
+  if((uint64_t)jsiz != jsiz64){
+    tchdbsetecode(hdb, TCEOVERFLOW, __FILE__, __LINE__, __func__);
+    return false;
+  }
   if(jsiz < nsiz) return false;
   rec->rsiz = jsiz;
   uint64_t base = rec->off;
@@ -2563,9 +2568,19 @@ static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
     uint64_t noff = rec->off + nsiz + psiz;
     if(jsiz >= (noff - rec->off) * 2){
       TCDODEBUG(hdb->cnt_dividefbp++);
-      nsiz = off - noff;
+      uint64_t nsiz64 = off - noff;
+      nsiz = nsiz64;
+      if((uint64_t)nsiz != nsiz64){
+        tchdbsetecode(hdb, TCEOVERFLOW, __FILE__, __LINE__, __func__);
+        return false;
+      }
       if(!tchdbwritefb(hdb, noff, nsiz)) return false;
-      rec->rsiz = noff - rec->off;
+      uint64_t rsiz64 = noff - rec->off;
+      rec->rsiz = rsiz64;
+      if((uint64_t)rec->rsiz != rsiz64){
+        tchdbsetecode(hdb, TCEOVERFLOW, __FILE__, __LINE__, __func__);
+        return false;
+      }
       tchdbfbpinsert(hdb, noff, nsiz);
     }
   }
