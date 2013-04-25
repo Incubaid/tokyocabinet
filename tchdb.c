@@ -2514,6 +2514,9 @@ static bool tchdbfbpsearch(TCHDB *hdb, TCHREC *rec){
    The return value is whether splicing succeeded or not. */
 static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
   assert(hdb && rec && nsiz > 0);
+  if(nsiz > (0x80000000 - hdb->align)){
+    return false;
+  }
   if(hdb->mmtx){
     if(hdb->fbpnum < 1) return false;
     uint64_t off = rec->off + rec->rsiz;
@@ -2536,17 +2539,30 @@ static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
     return false;
   }
   uint64_t off = rec->off + rec->rsiz;
+#define HDBMAXSCAN (1024 * 1024)
+  uint64_t moff = rec->off + nsiz + ((nsiz > HDBMAXSCAN) ? nsiz : HDBMAXSCAN);
+  if(moff > hdb->fsiz){
+    moff = hdb->fsiz;
+  }
   TCHREC nrec;
   char nbuf[HDBIOBUFSIZ];
-  while(off < hdb->fsiz){
+  while(off < moff){
     nrec.off = off;
     if(!tchdbreadrec(hdb, &nrec, nbuf)) return false;
     if(nrec.magic != HDBMAGICFB) break;
     if(hdb->dfcur == off) hdb->dfcur += nrec.rsiz;
     if(hdb->iter == off) hdb->iter += nrec.rsiz;
+    if(((uint32_t)(off + nrec.rsiz)) != (off + nrec.rsiz)){
+      break;
+    }
     off += nrec.rsiz;
   }
-  uint32_t jsiz = off - rec->off;
+  uint64_t jsiz64 = off - rec->off;
+  uint32_t jsiz = jsiz64;
+  if((uint64_t)jsiz != jsiz64){
+    tchdbsetecode(hdb, TCEOVERFLOW, __FILE__, __LINE__, __func__);
+    return false;
+  }
   if(jsiz < nsiz) return false;
   rec->rsiz = jsiz;
   uint64_t base = rec->off;
@@ -2563,9 +2579,19 @@ static bool tchdbfbpsplice(TCHDB *hdb, TCHREC *rec, uint32_t nsiz){
     uint64_t noff = rec->off + nsiz + psiz;
     if(jsiz >= (noff - rec->off) * 2){
       TCDODEBUG(hdb->cnt_dividefbp++);
-      nsiz = off - noff;
+      uint64_t nsiz64 = off - noff;
+      nsiz = nsiz64;
+      if((uint64_t)nsiz != nsiz64){
+        tchdbsetecode(hdb, TCEOVERFLOW, __FILE__, __LINE__, __func__);
+        return false;
+      }
       if(!tchdbwritefb(hdb, noff, nsiz)) return false;
-      rec->rsiz = noff - rec->off;
+      uint64_t rsiz64 = noff - rec->off;
+      rec->rsiz = rsiz64;
+      if((uint64_t)rec->rsiz != rsiz64){
+        tchdbsetecode(hdb, TCEOVERFLOW, __FILE__, __LINE__, __func__);
+        return false;
+      }
       tchdbfbpinsert(hdb, noff, nsiz);
     }
   }
