@@ -9559,6 +9559,7 @@ const char *tcerrmsg(int ecode){
     case TCERMDIR: return "rmdir error";
     case TCEKEEP: return "existing record";
     case TCENOREC: return "no record found";
+    case TCEOVERFLOW: return "overflow detected";
     case TCEMISC: return "miscellaneous error";
   }
   return "unknown error";
