@@ -184,13 +184,16 @@ static int mycmpfunc(const char *aptr, int asiz, const char *bptr, int bsiz, voi
 /* safe 'write' */
 static int write_all(int fd, const char *data, size_t len){
   ssize_t r = 0;
+  int esave = 0;
   while(len > 0){
-    r = write(fd, data, len);
+    r = write(fd, data, MIN(len, SSIZE_MAX));
     if(r < 0){
       if(errno == EAGAIN || errno == EINTR){
         continue;
       }
+      esave = errno;
       perror("write");
+      errno = esave;
       return -1;
     }
     len -= r;
@@ -202,16 +205,20 @@ static int write_all(int fd, const char *data, size_t len){
 /* safe 'read' */
 static int read_all(int fd, char *data, size_t len){
   ssize_t r = 0;
+  int esave = 0;
   while(len > 0){
-    r = read(fd, data, len);
+    r = read(fd, data, MIN(len, SSIZE_MAX));
     if(r == 0){
+      errno = ENODATA;
       return -1;
     }
     if(r < 0){
       if(errno == EAGAIN || errno == EINTR){
         continue;
       }
+      esave = errno;
       perror("read");
+      errno = esave;
       return -1;
     }
     len -= r;
@@ -1145,13 +1152,13 @@ static int procdump(const char *path, TCCMP cmp, int omode){
   }
   TCXSTR *key = tcxstrnew();
   TCXSTR *val = tcxstrnew();
-  uint64_t len;
+  uint64_t len = 0;
   while(tcbdbcurrec(cur, key, val)){
     if(write_all(STDOUT_FILENO, magic_begin, sizeof(magic_begin) - 1) != 0){
       err = true;
       break;
     }
-    len = tcxstrsize(key);
+    len = TCHTOILL(tcxstrsize(key));
     if(write_all(STDOUT_FILENO, (const char *)&len, sizeof(len)) != 0){
       err = true;
       break;
@@ -1160,7 +1167,7 @@ static int procdump(const char *path, TCCMP cmp, int omode){
       err = true;
       break;
     }
-    len = tcxstrsize(val);
+    len = TCHTOILL(tcxstrsize(val));
     if(write_all(STDOUT_FILENO, (const char *)&len, sizeof(len)) != 0){
       err = true;
       break;
@@ -1208,8 +1215,8 @@ static int procimport(const char *path, int omode){
   char scratch_value[IMPORT_SCRATCH_SIZE];
   char *key = NULL;
   char *value = NULL;
-  uint64_t key_size;
-  uint64_t value_size;
+  uint64_t key_size = 0;
+  uint64_t value_size = 0;
   while(!err){
     if(read_all(STDIN_FILENO, magic, sizeof(magic_begin) - 1) != 0){
       err = true;
@@ -1226,6 +1233,7 @@ static int procimport(const char *path, int omode){
       err = true;
       break;
     }
+    key_size = TCITOHLL(key_size);
     if(key_size <= sizeof(scratch_key)){
       key = scratch_key;
     } else {
@@ -1245,6 +1253,7 @@ static int procimport(const char *path, int omode){
       }
       break;
     }
+    value_size = TCITOHLL(value_size);
     if(value_size <= sizeof(scratch_value)){
       value = scratch_value;
     } else {
