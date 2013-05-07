@@ -194,6 +194,7 @@ static int write_all(int fd, const char *data, size_t len){
       return -1;
     }
     len -= r;
+    data += r;
   }
   return 0;
 }
