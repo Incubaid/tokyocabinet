@@ -1277,6 +1277,10 @@ static int procimport(const char *path, int omode){
     }
   }
   printf(" (%08d)\n", cnt);
+  if(!tcbdbsync(bdb)){
+    printerr(bdb);
+    err = true;
+  }
   if(!tcbdbclose(bdb)){
     if(!err) printerr(bdb);
     err = true;
