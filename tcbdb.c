@@ -3477,6 +3477,10 @@ static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
     if((++cnt % 0xf == 0) && !tcbdbcacheadjust(bdb)) err = true;
   }
   tcbdbcurdel(cur);
+  if(!tcbdbsync(tbdb)) {
+    tcbdbsetecode(bdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
+    err = true;
+  }
   if(!tcbdbclose(tbdb)){
     tcbdbsetecode(bdb, tcbdbecode(tbdb), __FILE__, __LINE__, __func__);
     err = true;
@@ -3484,10 +3488,6 @@ static bool tcbdboptimizeimpl(TCBDB *bdb, int32_t lmemb, int32_t nmemb,
   bdb->lcnum = lcnum;
   bdb->ncnum = ncnum;
   tcbdbdel(tbdb);
-  if(unlink(path) == -1){
-    tcbdbsetecode(bdb, TCEUNLINK, __FILE__, __LINE__, __func__);
-    err = true;
-  }
   if(rename(tpath, path) == -1){
     tcbdbsetecode(bdb, TCERENAME, __FILE__, __LINE__, __func__);
     err = true;
