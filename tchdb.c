@@ -3538,10 +3538,6 @@ static bool tchdbopenimpl(TCHDB *hdb, const char *path, int omode){
     if(err){
       TCFREE(hdb->path);
       TCFREE(hdb->fbpool);
-      /* TODO Figure out this is required
-       * Since we unmap, I expect it's not... Should look into kernel sources.
-       */
-      madvise(hdb->map, xmsiz, MADV_DODUMP);
       munmap(hdb->map, xmsiz);
       close(fd);
       hdb->fd = -1;
@@ -3573,10 +3569,6 @@ static bool tchdbcloseimpl(TCHDB *hdb){
   if((hdb->omode & HDBOWRITER) && !tchdbmemsync(hdb, false)) err = true;
   size_t xmsiz = (hdb->xmsiz > hdb->msiz) ? hdb->xmsiz : hdb->msiz;
   if(!(hdb->omode & HDBOWRITER) && xmsiz > hdb->fsiz) xmsiz = hdb->fsiz;
-  /* TODO Figure out this is required
-   * Since we unmap, I expect it's not... Should look into kernel sources.
-   */
-  madvise(hdb->map, xmsiz, MADV_DODUMP);
   if(munmap(hdb->map, xmsiz) == -1){
     tchdbsetecode(hdb, TCEMMAP, __FILE__, __LINE__, __func__);
     err = true;
