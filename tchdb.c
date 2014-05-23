@@ -3480,6 +3480,7 @@ static bool tchdbopenimpl(TCHDB *hdb, const char *path, int omode){
     return false;
   }
 
+#if defined(MADV_DONTDUMP) /* Since Linux 3.4 only */
   /* Attempt to not include the DB file in core-dumps */
   if(madvise(map, xmsiz, MADV_DONTDUMP) == -1) {
     if(errno != ENOSYS && errno != EAGAIN) {
@@ -3489,6 +3490,7 @@ static bool tchdbopenimpl(TCHDB *hdb, const char *path, int omode){
       return false;
     }
   }
+#endif
 
   hdb->fbpmax = 1 << hdb->fpow;
   if(omode & HDBOWRITER){
