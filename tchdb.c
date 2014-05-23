@@ -3490,6 +3490,8 @@ static bool tchdbopenimpl(TCHDB *hdb, const char *path, int omode){
       return false;
     }
   }
+#else
+# warning MADV_DONTDUMP not available, core dumps could contain database content
 #endif
 
   hdb->fbpmax = 1 << hdb->fpow;
