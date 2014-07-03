@@ -178,7 +178,7 @@ static bool tchdbiternextintoxstr(TCHDB *hdb, TCXSTR *kxstr, TCXSTR *vxstr);
 static bool tchdboptimizeimpl(TCHDB *hdb, int64_t bnum, int8_t apow, int8_t fpow, uint8_t opts);
 static bool tchdbvanishimpl(TCHDB *hdb);
 static bool tchdbcopyimpl(TCHDB *hdb, const char *path);
-static bool tchdbdefragimpl(TCHDB *hdb, int64_t step);
+static HDBDEFRAGRESULT tchdbdefragimpl(TCHDB *hdb, int64_t step);
 static bool tchdbiterjumpimpl(TCHDB *hdb, const char *kbuf, int ksiz);
 static bool tchdbforeachimpl(TCHDB *hdb, TCITER iter, void *op);
 static bool tchdblockmethod(TCHDB *hdb, bool wr);
@@ -1514,31 +1514,48 @@ uint32_t tchdbdfunit(TCHDB *hdb){
 
 /* Perform dynamic defragmentation of a hash database object. */
 bool tchdbdefrag(TCHDB *hdb, int64_t step){
+  HDBDEFRAGRESULT r = tchdbdefrag2(hdb, step);
+  switch(r) {
+    case HDBDEFRAGSUCCESS:
+    case HDBDEFRAGDONE:
+      return true;
+      break;
+    case HDBDEFRAGERROR:
+    default:
+      return false;
+      break;
+  }
+  return false;
+}
+
+
+/* Perform dynamic defragmentation of a hash database object. */
+HDBDEFRAGRESULT tchdbdefrag2(TCHDB *hdb, int64_t step){
   assert(hdb);
   if(step > 0){
-    if(!HDBLOCKMETHOD(hdb, true)) return false;
+    if(!HDBLOCKMETHOD(hdb, true)) return HDBDEFRAGERROR;
     if(hdb->fd < 0 || !(hdb->omode & HDBOWRITER)){
       tchdbsetecode(hdb, TCEINVALID, __FILE__, __LINE__, __func__);
       HDBUNLOCKMETHOD(hdb);
-      return false;
+      return HDBDEFRAGERROR;
     }
     if(hdb->async && !tchdbflushdrp(hdb)){
       HDBUNLOCKMETHOD(hdb);
-      return false;
+      return HDBDEFRAGERROR;
     }
-    bool rv = tchdbdefragimpl(hdb, step);
+    HDBDEFRAGRESULT rv = tchdbdefragimpl(hdb, step);
     HDBUNLOCKMETHOD(hdb);
     return rv;
   }
-  if(!HDBLOCKMETHOD(hdb, false)) return false;
+  if(!HDBLOCKMETHOD(hdb, false)) return HDBDEFRAGERROR;
   if(hdb->fd < 0 || !(hdb->omode & HDBOWRITER)){
     tchdbsetecode(hdb, TCEINVALID, __FILE__, __LINE__, __func__);
     HDBUNLOCKMETHOD(hdb);
-    return false;
+    return HDBDEFRAGERROR;
   }
   if(hdb->async && !tchdbflushdrp(hdb)){
     HDBUNLOCKMETHOD(hdb);
-    return false;
+    return HDBDEFRAGERROR;
   }
   bool err = false;
   if(HDBLOCKALLRECORDS(hdb, true)){
@@ -1548,11 +1565,15 @@ bool tchdbdefrag(TCHDB *hdb, int64_t step){
     err = true;
   }
   bool stop = false;
+  HDBDEFRAGRESULT res = HDBDEFRAGSUCCESS;
   while(!err && !stop){
     if(HDBLOCKALLRECORDS(hdb, true)){
       uint64_t cur = hdb->dfcur;
-      if(!tchdbdefragimpl(hdb, UINT8_MAX)) err = true;
-      if(hdb->dfcur <= cur) stop = true;
+      if(tchdbdefragimpl(hdb, UINT8_MAX) == HDBDEFRAGERROR) err = true;
+      if(hdb->dfcur <= cur){
+        res = HDBDEFRAGDONE;
+        stop = true;
+      }
       HDBUNLOCKALLRECORDS(hdb);
       HDBTHREADYIELD(hdb);
     } else {
@@ -1560,7 +1581,7 @@ bool tchdbdefrag(TCHDB *hdb, int64_t step){
     }
   }
   HDBUNLOCKMETHOD(hdb);
-  return !err;
+  return err ? HDBDEFRAGERROR : res;
 }
 
 
@@ -4717,7 +4738,7 @@ static bool tchdbcopyimpl(TCHDB *hdb, const char *path){
    `hdb' specifies the hash database object connected.
    `step' specifie the number of steps.
    If successful, the return value is true, else, it is false. */
-static bool tchdbdefragimpl(TCHDB *hdb, int64_t step){
+static HDBDEFRAGRESULT tchdbdefragimpl(TCHDB *hdb, int64_t step){
   assert(hdb && step >= 0);
   TCDODEBUG(hdb->cnt_defrag++);
   hdb->dfcnt = 0;
@@ -4726,11 +4747,11 @@ static bool tchdbdefragimpl(TCHDB *hdb, int64_t step){
   while(true){
     if(hdb->dfcur >= hdb->fsiz){
       hdb->dfcur = hdb->frec;
-      return true;
+      return HDBDEFRAGDONE;
     }
-    if(step-- < 1) return true;
+    if(step-- < 1) return HDBDEFRAGSUCCESS;
     rec.off = hdb->dfcur;
-    if(!tchdbreadrec(hdb, &rec, rbuf)) return false;
+    if(!tchdbreadrec(hdb, &rec, rbuf)) return HDBDEFRAGERROR;
     if(rec.magic == HDBMAGICFB) break;
     hdb->dfcur += rec.rsiz;
   }
@@ -4744,7 +4765,7 @@ static bool tchdbdefragimpl(TCHDB *hdb, int64_t step){
   step++;
   while(step > 0 && cur < hdb->fsiz){
     rec.off = cur;
-    if(!tchdbreadrec(hdb, &rec, rbuf)) return false;
+    if(!tchdbreadrec(hdb, &rec, rbuf)) return HDBDEFRAGERROR;
     uint32_t rsiz = rec.rsiz;
     if(rec.magic == HDBMAGICREC){
       if(rec.psiz >= align){
@@ -4753,7 +4774,7 @@ static bool tchdbdefragimpl(TCHDB *hdb, int64_t step){
         rec.rsiz -= diff;
         fbsiz += diff;
       }
-      if(!tchdbshiftrec(hdb, &rec, rbuf, dest)) return false;
+      if(!tchdbshiftrec(hdb, &rec, rbuf, dest)) return HDBDEFRAGERROR;
       if(hdb->iter == cur) hdb->iter = dest;
       dest += rec.rsiz;
       step--;
@@ -4763,6 +4784,7 @@ static bool tchdbdefragimpl(TCHDB *hdb, int64_t step){
     }
     cur += rsiz;
   }
+  HDBDEFRAGRESULT res = HDBDEFRAGSUCCESS;
   if(cur < hdb->fsiz){
     if(fbsiz > HDBFBMAXSIZ){
       tchdbfbptrim(hdb, base, cur, 0, 0);
@@ -4772,18 +4794,19 @@ static bool tchdbdefragimpl(TCHDB *hdb, int64_t step){
         uint32_t rsiz = (size > HDBFBMAXSIZ) ? HDBFBMAXSIZ : size;
         if(size - rsiz < HDBMINRUNIT) rsiz = size;
         tchdbfbpinsert(hdb, off, rsiz);
-        if(!tchdbwritefb(hdb, off, rsiz)) return false;
+        if(!tchdbwritefb(hdb, off, rsiz)) return HDBDEFRAGERROR;
         off += rsiz;
         size -= rsiz;
       }
     } else {
       tchdbfbptrim(hdb, base, cur, dest, fbsiz);
-      if(!tchdbwritefb(hdb, dest, fbsiz)) return false;
+      if(!tchdbwritefb(hdb, dest, fbsiz)) return HDBDEFRAGERROR;
     }
     hdb->dfcur = cur - fbsiz;
+    res = HDBDEFRAGSUCCESS;
   } else {
     TCDODEBUG(hdb->cnt_trunc++);
-    if(hdb->tran && !tchdbwalwrite(hdb, dest, fbsiz)) return false;
+    if(hdb->tran && !tchdbwalwrite(hdb, dest, fbsiz)) return HDBDEFRAGERROR;
     tchdbfbptrim(hdb, base, cur, 0, 0);
     hdb->dfcur = hdb->frec;
     hdb->fsiz = dest;
@@ -4794,12 +4817,13 @@ static bool tchdbdefragimpl(TCHDB *hdb, int64_t step){
     if(!hdb->tran){
       if(ftruncate(hdb->fd, hdb->fsiz) == -1){
         tchdbsetecode(hdb, TCETRUNC, __FILE__, __LINE__, __func__);
-        return false;
+        return HDBDEFRAGERROR;
       }
       hdb->xfsiz = 0;
     }
+    res = HDBDEFRAGDONE;
   }
-  return true;
+  return res;
 }
 
 

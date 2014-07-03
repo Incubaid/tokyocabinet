@@ -115,6 +115,12 @@ enum {                                   /* enumeration for cursor put mode */
   BDBCPAFTER                             /* after */
 };
 
+typedef enum {
+  BDBDEFRAGSUCCESS = 1,                  /* defrag successful but end of database not reached */
+  BDBDEFRAGERROR = 2,                    /* defrag error */
+  BDBDEFRAGDONE = 3                      /* defrag successful and end of database reached */
+} BDBDEFRAGRESULT;
+
 
 /* Get the message string corresponding to an error code.
    `ecode' specifies the error code.
@@ -1004,6 +1010,13 @@ uint32_t tcbdbdfunit(TCBDB *bdb);
    If successful, the return value is true, else, it is false. */
 bool tcbdbdefrag(TCBDB *bdb, int64_t step);
 
+/* Perform dynamic defragmentation of a B+ tree database object.
+   `bdb' specifies the B+ tree database object connected as a writer.
+   `step' specifie the number of steps.  If it is not more than 0, the whole file is defragmented
+   gradually without keeping a continuous lock.
+   If successful, the return value is BDBDEFRAGSUCCESS or BDBDEFRAGDONE, else, it is
+   BDBDEFRAGERROR. */
+BDBDEFRAGRESULT tcbdbdefrag2(TCBDB *bdb, int64_t step);
 
 /* Clear the cache of a B+ tree database object.
    `bdb' specifies the B+ tree database object.

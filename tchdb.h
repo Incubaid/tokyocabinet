@@ -132,6 +132,12 @@ enum {                                   /* enumeration for open modes */
   HDBOTSYNC = 1 << 6                     /* synchronize every transaction */
 };
 
+typedef enum {
+  HDBDEFRAGSUCCESS = 1,                  /* defrag successful but end of database not reached */
+  HDBDEFRAGERROR = 2,                    /* defrag error */
+  HDBDEFRAGDONE = 3                      /* defrag successful and end of database reached */
+} HDBDEFRAGRESULT;
+
 
 /* Get the message string corresponding to an error code.
    `ecode' specifies the error code.
@@ -749,6 +755,15 @@ uint32_t tchdbdfunit(TCHDB *hdb);
    gradually without keeping a continuous lock.
    If successful, the return value is true, else, it is false. */
 bool tchdbdefrag(TCHDB *hdb, int64_t step);
+
+
+/* Perform dynamic defragmentation of a hash database object.
+   `hdb' specifies the hash database object connected as a writer.
+   `step' specifie the number of steps.  If it is not more than 0, the whole file is defragmented
+   gradually without keeping a continuous lock.
+   If successful, the return value is HDBDEFRAGSUCCESS or HDBDEFRAGDONE, else, it is
+   HDBDEFRAGERROR. */
+HDBDEFRAGRESULT tchdbdefrag2(TCHDB *hdb, int64_t step);
 
 
 /* Clear the cache of a hash tree database object.
