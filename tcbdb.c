@@ -1561,16 +1561,45 @@ uint32_t tcbdbdfunit(TCBDB *bdb){
 
 /* Perform dynamic defragmentation of a B+ tree database object. */
 bool tcbdbdefrag(TCBDB *bdb, int64_t step){
+  BDBDEFRAGRESULT r = tcbdbdefrag2(bdb, step);
+  switch(r) {
+    case BDBDEFRAGSUCCESS:
+    case BDBDEFRAGDONE:
+      return true;
+      break;
+    case BDBDEFRAGERROR:
+    default:
+      return false;
+      break;
+  }
+  return false;
+}
+
+
+/* Perform dynamic defragmentation of a B+ tree database object. */
+BDBDEFRAGRESULT tcbdbdefrag2(TCBDB *bdb, int64_t step){
   assert(bdb);
   if(!BDBLOCKMETHOD(bdb, false)) return false;
   if(!bdb->open || !bdb->wmode){
     tcbdbsetecode(bdb, TCEINVALID, __FILE__, __LINE__, __func__);
     BDBUNLOCKMETHOD(bdb);
-    return false;
+    return BDBDEFRAGERROR;
   }
-  bool rv = tchdbdefrag(bdb->hdb, step);
+  HDBDEFRAGRESULT rv = tchdbdefrag2(bdb->hdb, step);
   BDBUNLOCKMETHOD(bdb);
-  return rv;
+  switch(rv) {
+    case HDBDEFRAGSUCCESS:
+      return BDBDEFRAGSUCCESS;
+      break;
+    case HDBDEFRAGDONE:
+      return HDBDEFRAGDONE;
+      break;
+    case HDBDEFRAGERROR:
+    default:
+      return BDBDEFRAGERROR;
+      break;
+  }
+  return BDBDEFRAGERROR;
 }
 
 
